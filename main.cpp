@@ -216,7 +216,18 @@ static int process_config(VolumeManager *vm) {
                     /* If the first character is not a '/', it must be flags */
                     break;
                 }
-                if (dv->addPath(sysfs_path)) {
+                /* To allow symlinked paths to be specified we need to convert
+                 * them with realpath(). This is made a bit more complicated
+                 * because our paths are relative to the sysfs base, so we need
+                 * to prefix them with '/sys' before conversion and also remove
+                 * '/sys' from the result (by skipping the first 4 characters).
+                 */
+                char sp[sizeof(line)] = "/sys";
+                strcat(sp, sysfs_path);
+                char *rp = realpath(sp, NULL);
+                int error = dv->addPath(rp + 4); /* Real path without '/sys' */
+                free(rp);
+                if (error) {
                     SLOGE("Failed to add devpath %s to volume %s", sysfs_path,
                          label);
                     goto out_fail;
