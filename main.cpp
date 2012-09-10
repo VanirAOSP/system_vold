@@ -224,8 +224,14 @@ static int process_config(VolumeManager *vm) {
                  */
                 char sp[sizeof(line)] = "/sys";
                 strcat(sp, sysfs_path);
+                struct stat s;
+                int error = stat(sp, &s);
+                if (error == -1) {
+                    SLOGE("wrong entry in vold.fstab %s", sysfs_path);
+                    goto out_fail;
+                }
                 char *rp = realpath(sp, NULL);
-                int error = dv->addPath(rp + 4); /* Real path without '/sys' */
+                error = dv->addPath(rp + 4); /* Real path without '/sys' */
                 free(rp);
                 if (error) {
                     SLOGE("Failed to add devpath %s to volume %s", sysfs_path,
