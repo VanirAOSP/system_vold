@@ -31,7 +31,6 @@
 #include <sys/mount.h>
 
 #include <linux/kdev_t.h>
-#include <linux/fs.h>
 
 #define LOG_TAG "Vold"
 
@@ -67,16 +66,18 @@ int Ext4::doMount(const char *fsPath, const char *mountPoint, bool ro, bool remo
     return rc;
 }
 
-int Ext4::format(const char *fsPath) {
+int Ext4::format(const char *fsPath, const char *mountpoint) {
     int fd;
-    const char *args[4];
+    const char *args[6];
     int rc;
 
     args[0] = MKEXT4FS_PATH;
     args[1] = "-J";
-    args[2] = fsPath;
-    args[3] = NULL;
-    rc = logwrap(3, args, 1);
+    args[2] = "-a";
+    args[3] = mountpoint;
+    args[4] = fsPath;
+    args[5] = NULL;
+    rc = logwrap(5, args, 1);
 
     if (rc == 0) {
         SLOGI("Filesystem (ext4) formatted OK");
