@@ -36,6 +36,8 @@
 
 #include <private/android_filesystem_config.h>
 
+#include <blkid/blkid.h>
+
 #define LOG_TAG "Vold"
 
 #include <cutils/log.h>
@@ -43,13 +45,27 @@
 #include "Volume.h"
 #include "VolumeManager.h"
 #include "ResponseCode.h"
+#include "Ext4.h"
 #include "Fat.h"
+#include "Ntfs.h"
 #include "Process.h"
 #include "cryptfs.h"
 
+#ifndef FUSE_SDCARD_UID
+#define FUSE_SDCARD_UID 1023
+#endif
+#ifndef FUSE_SDCARD_GID
+#define FUSE_SDCARD_GID 1023
+#endif
+
+// Stringify defined values
+#define DO_STRINGIFY(str) #str
+#define STRINGIFY(str) DO_STRINGIFY(str)
+
+static char SDCARD_DAEMON_PATH[] = "/system/bin/sdcard";
+
 extern "C" void dos_partition_dec(void const *pp, struct dos_partition *d);
 extern "C" void dos_partition_enc(void *pp, struct dos_partition *d);
-
 
 /*
  * Secure directory - stuff that only root can see
@@ -87,6 +103,12 @@ const char *Volume::ASECDIR           = "/mnt/asec";
  */
 const char *Volume::LOOPDIR           = "/mnt/obb";
 
+/*
+ * Path for fuse
+ */
+const char *Volume::FUSEDIR           = "/mnt/fuse";
+
+
 static const char *stateToStr(int state) {
     if (state == Volume::State_Init)
         return "Initializing";
@@ -113,6 +135,7 @@ static const char *stateToStr(int state) {
 }
 
 Volume::Volume(VolumeManager *vm, const char *label, const char *mount_point) {
+    char switchable[PROPERTY_VALUE_MAX];
     mVm = vm;
     mDebug = false;
     mLabel = strdup(label);
@@ -121,6 +144,30 @@ Volume::Volume(VolumeManager *vm, const char *label, const char *mount_point) {
     mCurrentlyMountedKdev = -1;
     mPartIdx = -1;
     mRetryMount = false;
+    mLunNumber = -1;
+
+    property_get("persist.sys.vold.switchexternal", switchable, "0");
+    if (!strcmp(switchable,"1")) {
+        char *first, *second = NULL;
+        const char *delim = ",";
+
+        property_get("ro.vold.switchablepair", switchable, "");
+
+        if (!(first = strtok(switchable, delim))) {
+            SLOGE("Mount switch requested, but no switchable mountpoints found");
+            return;
+        } else if (!(second = strtok(NULL, delim))) {
+            SLOGE("Mount switch requested, but bad switchable mountpoints found");
+            return;
+        }
+        if (!strcmp(mount_point,first)) {
+                free(mMountpoint);
+                mMountpoint = strdup(second);
+        } else if (!strcmp(mount_point,second)) {
+                free(mMountpoint);
+                mMountpoint = strdup(first);
+        }
+    }
 }
 
 Volume::~Volume() {
@@ -159,6 +206,22 @@ dev_t Volume::getShareDevice() {
     return getDiskDevice();
 }
 
+char *getFsType(const char * devicePath) {
+    char *fstype = NULL;
+
+    SLOGD("Trying to get filesystem type for %s \n", devicePath);
+
+    fstype = blkid_get_tag_value(NULL, "TYPE", devicePath);
+    if (fstype) {
+        SLOGD("Found %s filesystem on %s\n", fstype, devicePath);
+    } else {
+        SLOGE("None or unknown filesystem on %s\n", devicePath);
+        return NULL;
+    }
+
+    return fstype;
+}
+
 void Volume::handleVolumeShared() {
 }
 
@@ -168,6 +231,15 @@ void Volume::handleVolumeUnshared() {
 int Volume::handleBlockEvent(NetlinkEvent *evt) {
     errno = ENOSYS;
     return -1;
+}
+
+bool Volume::isPrimaryStorage() {
+    const char* externalStorage = getenv("EXTERNAL_STORAGE") ? : "/mnt/sdcard";
+    return !strcmp(getMountpoint(), externalStorage);
+}
+
+void Volume::setLunNumber(int lunNumber) {
+    mLunNumber = lunNumber;
 }
 
 void Volume::setState(int state) {
@@ -247,6 +319,15 @@ int Volume::formatVol() {
     sprintf(devicePath, "/dev/block/vold/%d:%d",
             MAJOR(partNode), MINOR(partNode));
 
+#ifdef VOLD_EMMC_SHARES_DEV_MAJOR
+    // If emmc and sdcard share dev major number, vold may pick
+    // incorrectly based on partition nodes alone, formatting
+    // the wrong device. Use device nodes instead.
+    dev_t deviceNodes;
+    getDeviceNodes((dev_t *) &deviceNodes, 1);
+    sprintf(devicePath, "/dev/block/vold/%d:%d", MAJOR(deviceNodes), MINOR(deviceNodes));
+#endif
+
     if (mDebug) {
         SLOGI("Formatting volume %s (%s)", getLabel(), devicePath);
     }
@@ -293,8 +374,7 @@ int Volume::mountVol() {
     dev_t deviceNodes[4];
     int n, i, rc = 0;
     char errmsg[255];
-    const char* externalStorage = getenv("EXTERNAL_STORAGE");
-    bool primaryStorage = externalStorage && !strcmp(getMountpoint(), externalStorage);
+    bool primaryStorage = isPrimaryStorage();
     char decrypt_state[PROPERTY_VALUE_MAX];
     char crypto_state[PROPERTY_VALUE_MAX];
     char encrypt_progress[PROPERTY_VALUE_MAX];
@@ -389,6 +469,8 @@ int Volume::mountVol() {
 
     for (i = 0; i < n; i++) {
         char devicePath[255];
+        char *fstype = NULL;
+        bool isUnixFs = false;
 
         sprintf(devicePath, "/dev/block/vold/%d:%d", MAJOR(deviceNodes[i]),
                 MINOR(deviceNodes[i]));
@@ -398,18 +480,6 @@ int Volume::mountVol() {
         errno = 0;
         setState(Volume::State_Checking);
 
-        if (Fat::check(devicePath)) {
-            if (errno == ENODATA) {
-                SLOGW("%s does not contain a FAT filesystem\n", devicePath);
-                continue;
-            }
-            errno = EIO;
-            /* Badness - abort the mount */
-            SLOGE("%s failed FS checks (%s)", devicePath, strerror(errno));
-            setState(Volume::State_Idle);
-            return -1;
-        }
-
         /*
          * Mount the device on our internal staging mountpoint so we can
          * muck with it before exposing it to non priviledged users.
@@ -417,18 +487,72 @@ int Volume::mountVol() {
         errno = 0;
         int gid;
 
-        if (primaryStorage) {
-            // Special case the primary SD card.
-            // For this we grant write access to the SDCARD_RW group.
-            gid = AID_SDCARD_RW;
+        // Originally, non-primary storage was set to MEDIA_RW group which
+        // prevented users from writing to it. We don't want that.
+        gid = AID_SDCARD_RW;
+
+        fstype = getFsType((const char *)devicePath);
+
+        if (fstype != NULL) {
+            if (strcmp(fstype, "vfat") == 0) {
+
+                if (Fat::check(devicePath)) {
+                    errno = EIO;
+                    /* Badness - abort the mount */
+                    SLOGE("%s failed FS checks (%s)", devicePath, strerror(errno));
+                    setState(Volume::State_Idle);
+                    free(fstype);
+                    return -1;
+                }
+
+                if (Fat::doMount(devicePath, "/mnt/secure/staging", false, false, false,
+                        AID_SYSTEM, gid, 0702, true)) {
+                    SLOGE("%s failed to mount via VFAT (%s)\n", devicePath, strerror(errno));
+                    continue;
+                }
+
+            } else if (strcmp(fstype, "ext4") == 0) {
+
+                isUnixFs = true;
+                if (Ext4::check(devicePath)) {
+                    errno = EIO;
+                    isUnixFs = false;
+                    /* Badness - abort the mount */
+                    SLOGE("%s failed FS checks (%s)", devicePath, strerror(errno));
+                    setState(Volume::State_Idle);
+                    free(fstype);
+                    return -1;
+                }
+
+                if (Ext4::doMount(devicePath, "/mnt/secure/staging", false, false, false)) {
+                    SLOGE("%s failed to mount via EXT4 (%s)\n", devicePath, strerror(errno));
+                    continue;
+                }
+
+            } else if (strcmp(fstype, "ntfs") == 0) {
+
+                if (Ntfs::doMount(devicePath, "/mnt/secure/staging", false, false, false,
+                        AID_SYSTEM, gid, 0702, true)) {
+                    SLOGE("%s failed to mount via NTFS (%s)\n", devicePath, strerror(errno));
+                    continue;
+                }
+
+            } else {
+                // Unsupported filesystem
+                errno = ENODATA;
+                setState(Volume::State_Idle);
+                free(fstype);
+                return -1;
+            }
+
+            free(fstype);
+
         } else {
-            // For secondary external storage we keep things locked up.
-            gid = AID_MEDIA_RW;
-        }
-        if (Fat::doMount(devicePath, "/mnt/secure/staging", false, false, false,
-                AID_SYSTEM, gid, 0702, true)) {
-            SLOGE("%s failed to mount via VFAT (%s)\n", devicePath, strerror(errno));
-            continue;
+            // Unsupported filesystem
+            errno = ENODATA;
+            setState(Volume::State_Idle);
+            free(fstype);
+            return -1;
         }
 
         SLOGI("Device %s, target %s mounted @ /mnt/secure/staging", devicePath, getMountpoint());
@@ -447,11 +571,66 @@ int Volume::mountVol() {
          * Now that the bindmount trickery is done, atomically move the
          * whole subtree to expose it to non priviledged users.
          */
-        if (doMoveMount("/mnt/secure/staging", getMountpoint(), false)) {
-            SLOGE("Failed to move mount (%s)", strerror(errno));
-            umount("/mnt/secure/staging");
-            setState(Volume::State_Idle);
-            return -1;
+        if (isUnixFs) {
+            /*
+             * In case of a unix filesystem we're using the sdcard daemon
+             * to expose the subtree to non privileged users to avoid
+             * permission issues for data created by apps.
+             */
+            const char* label = getLabel();
+            char* fuseSrc = (char*) malloc(strlen(FUSEDIR) + strlen("/") + strlen(label) + 1);
+            sprintf(fuseSrc, "%s/%s", FUSEDIR, label);
+            bool failed = false;
+
+            // Create fuse dir if not exists
+            if (access(fuseSrc, R_OK | W_OK)) {
+                if (mkdir(fuseSrc, 0775)) {
+                    SLOGE("Failed to create %s (%s)", fuseSrc, strerror(errno));
+                    failed = true;
+                }
+            }
+
+            // Move subtree to fuse dir
+            if (!failed && doMoveMount("/mnt/secure/staging", fuseSrc, false)) {
+                SLOGE("Failed to move mount (%s)", strerror(errno));
+                umount("/mnt/secure/staging");
+                failed = true;
+            }
+
+            // Set owner and group on fuse dir
+            if (!failed && chown(fuseSrc, FUSE_SDCARD_UID, FUSE_SDCARD_GID)) {
+                SLOGE("Failed to set owner/group on %s (%s)", fuseSrc, strerror(errno));
+                failed = true;
+            }
+
+            // Set permissions (775) on fuse dir
+            if (!failed && chmod(fuseSrc, S_IRWXU|S_IRWXG|S_IROTH|S_IXOTH)) {
+                SLOGE("Failed to set permissions on %s (%s)", fuseSrc, strerror(errno));
+                failed = true;
+            }
+
+            // Invoke the sdcard daemon to expose it
+            if(!failed && doFuseMount(fuseSrc, getMountpoint())) {
+                SLOGE("Failed to fuse mount (%s) -> (%s)", fuseSrc, getMountpoint());
+                failed = true;
+            }
+
+            free(fuseSrc);
+
+            if (failed) {
+                setState(Volume::State_Idle);
+                return -1;
+            }
+
+        } else {
+
+            if (doMoveMount("/mnt/secure/staging", getMountpoint(), false)) {
+                SLOGE("Failed to move mount (%s)", strerror(errno));
+                umount("/mnt/secure/staging");
+                setState(Volume::State_Idle);
+                return -1;
+            }
+
         }
         setState(Volume::State_Mounted);
         mCurrentlyMountedKdev = deviceNodes[i];
@@ -561,6 +740,27 @@ int Volume::doMoveMount(const char *src, const char *dst, bool force) {
     return -1;
 }
 
+int Volume::doFuseMount(const char *src, const char *dst) {
+    if (access(SDCARD_DAEMON_PATH, X_OK)) {
+        SLOGE("Can't invoke sdcard daemon.\n");
+        return -1;
+    }
+    const char* const args[] = { "sdcard", src, dst, STRINGIFY(FUSE_SDCARD_UID), STRINGIFY(FUSE_SDCARD_GID), NULL };
+    pid_t fusePid;
+
+    fusePid=fork();
+
+    if (fusePid == 0) {
+        SLOGW("Invoking sdcard daemon (%s) -> (%s)", src, dst);
+        if (execv(SDCARD_DAEMON_PATH, (char* const*)args) == -1) {
+            SLOGE("Failed to invoke the sdcard daemon!");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int Volume::doUnmount(const char *path, bool force) {
     int retries = 10;
 
@@ -597,6 +797,10 @@ int Volume::doUnmount(const char *path, bool force) {
 
 int Volume::unmountVol(bool force, bool revert) {
     int i, rc;
+    const char* externalStorage = getenv("EXTERNAL_STORAGE");
+    const char* label = getLabel();
+    char* fuseDir = (char*) malloc(strlen(FUSEDIR) + strlen("/") + strlen(label) + 1);
+    sprintf(fuseDir, "%s/%s", FUSEDIR, label);
 
     if (getState() != Volume::State_Mounted) {
         SLOGE("Volume %s unmount request when not mounted", getLabel());
@@ -607,24 +811,37 @@ int Volume::unmountVol(bool force, bool revert) {
     setState(Volume::State_Unmounting);
     usleep(1000 * 1000); // Give the framework some time to react
 
-    /*
-     * Remove the bindmount we were using to keep a reference to
-     * the previously obscured directory.
-     */
-    if (doUnmount(Volume::SEC_ASECDIR_EXT, force)) {
-        SLOGE("Failed to remove bindmount on %s (%s)", SEC_ASECDIR_EXT, strerror(errno));
-        goto fail_remount_tmpfs;
+    /* Undo createBindMounts(), which is only called for primary storage */
+    if (isPrimaryStorage()) {
+        /*
+         * Remove the bindmount we were using to keep a reference to
+         * the previously obscured directory.
+         */
+        if (doUnmount(Volume::SEC_ASECDIR_EXT, force)) {
+            SLOGE("Failed to remove bindmount on %s (%s)", SEC_ASECDIR_EXT, strerror(errno));
+            goto fail_remount_tmpfs;
+        }
+
+        /*
+         * Unmount the tmpfs which was obscuring the asec image directory
+         * from non root users
+         */
+        char secure_dir[PATH_MAX];
+        snprintf(secure_dir, PATH_MAX, "%s/.android_secure", getMountpoint());
+        if (doUnmount(secure_dir, force)) {
+            SLOGE("Failed to unmount tmpfs on %s (%s)", secure_dir, strerror(errno));
+            goto fail_republish;
+        }
     }
 
     /*
-     * Unmount the tmpfs which was obscuring the asec image directory
-     * from non root users
+     * Unmount the actual block device from fuse dir if exists
      */
-    char secure_dir[PATH_MAX];
-    snprintf(secure_dir, PATH_MAX, "%s/.android_secure", getMountpoint());
-    if (doUnmount(secure_dir, force)) {
-        SLOGE("Failed to unmount tmpfs on %s (%s)", secure_dir, strerror(errno));
-        goto fail_republish;
+    if (!access(fuseDir, R_OK | W_OK)) {
+        if (doUnmount(fuseDir, force)) {
+            SLOGE("Failed to unmount %s (%s)", fuseDir, strerror(errno));
+            goto out_nomedia;
+        }
     }
 
     /*
@@ -649,6 +866,7 @@ int Volume::unmountVol(bool force, bool revert) {
 
     setState(Volume::State_Idle);
     mCurrentlyMountedKdev = -1;
+    free(fuseDir);
     return 0;
 
     /*
@@ -675,6 +893,7 @@ fail_republish:
 
 out_nomedia:
     setState(Volume::State_NoMedia);
+    free(fuseDir);
     return -1;
 }
 int Volume::initializeMbr(const char *deviceNode) {

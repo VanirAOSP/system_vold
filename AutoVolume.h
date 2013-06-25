@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2010 The Android-x86 Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,22 @@
  * limitations under the License.
  */
 
-#ifndef _EXT4_H
-#define _EXT4_H
+#ifndef _AUTOVOLUME_H
+#define _AUTOVOLUME_H
 
-#include <unistd.h>
+#include "DirectVolume.h"
 
-class Ext4 {
+
+class AutoVolume : public DirectVolume {
 public:
-    static int doMount(const char *fsPath, const char *mountPoint, bool ro, bool remount,
-            bool executable);
-    static int check(const char *fsPath);
-    static int format(const char *fsPath);
+    AutoVolume(VolumeManager *vm, const char *label, const char *mount_point, const char *part_name = 0);
+    virtual ~AutoVolume();
+
+protected:
+    int handleBlockEvent(NetlinkEvent *evt);
+
+private:
+    char *mSdcard;
 };
 
 #endif

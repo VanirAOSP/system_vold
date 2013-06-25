@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2008 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,19 @@
  * limitations under the License.
  */
 
-#ifndef _EXT4_H
-#define _EXT4_H
+#ifndef _NTFS_H
+#define _NTFS_H
 
 #include <unistd.h>
 
-class Ext4 {
+class Ntfs {
 public:
-    static int doMount(const char *fsPath, const char *mountPoint, bool ro, bool remount,
-            bool executable);
     static int check(const char *fsPath);
-    static int format(const char *fsPath);
+    static int doMount(const char *fsPath, const char *mountPoint,
+                       bool ro, bool remount, bool executable,
+                       int ownerUid, int ownerGid, int permMask,
+                       bool createLost);
+    static int format(const char *fsPath, unsigned int numSectors);
 };
 
 #endif
