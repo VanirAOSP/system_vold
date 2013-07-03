@@ -46,7 +46,6 @@ public:
     static const char *ASECDIR;
 
     static const char *LOOPDIR;
-    static const char *FUSEDIR;
 
 protected:
     char *mLabel;
@@ -106,7 +105,6 @@ private:
     int createBindMounts();
     int doUnmount(const char *path, bool force);
     int doMoveMount(const char *src, const char *dst, bool force);
-    int doFuseMount(const char *src, const char *dst);
     void protectFromAutorunStupidity();
 };
 
