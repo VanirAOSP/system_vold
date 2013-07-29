@@ -29,22 +29,23 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/wait.h>
 
 #include <linux/kdev_t.h>
-#include <linux/fs.h>
 
 #define LOG_TAG "Vold"
 
 #include <cutils/log.h>
 #include <cutils/properties.h>
 
+#include <logwrap/logwrap.h>
+
 #include "Ext4.h"
+#include "VoldUtil.h"
+
 
 static char E2FSCK_PATH[] = "/system/bin/e2fsck";
 static char MKEXT4FS_PATH[] = "/system/bin/make_ext4fs";
-
-extern "C" int logwrap(int argc, const char **argv, int background);
-
 
 int Ext4::doMount(const char *fsPath, const char *mountPoint, bool ro, bool remount,
         bool executable) {
@@ -76,6 +77,7 @@ int Ext4::check(const char *fsPath) {
     }
 
     int rc = -1;
+    int status;
     do {
         const char *args[5];
         args[0] = E2FSCK_PATH;
@@ -84,7 +86,8 @@ int Ext4::check(const char *fsPath) {
         args[3] = fsPath;
         args[4] = NULL;
 
-        rc = logwrap(4, args, 1);
+        rc = android_fork_execvp(ARRAY_SIZE(args), (char **)args, &status, false,
+            true);
 
         switch(rc) {
         case 0:
@@ -113,22 +116,38 @@ int Ext4::check(const char *fsPath) {
     return 0;
 }
 
-int Ext4::format(const char *fsPath) {
+int Ext4::format(const char *fsPath, const char *mountpoint) {
     int fd;
-    const char *args[4];
+    const char *args[5];
     int rc;
+    int status;
 
     args[0] = MKEXT4FS_PATH;
     args[1] = "-J";
-    args[2] = fsPath;
-    args[3] = NULL;
-    rc = logwrap(3, args, 1);
+    args[2] = "-a";
+    args[3] = mountpoint;
+    args[4] = fsPath;
+    rc = android_fork_execvp(ARRAY_SIZE(args), (char **)args, &status, false,
+            true);
+    if (rc != 0) {
+        SLOGE("Filesystem (ext4) format failed due to logwrap error");
+        errno = EIO;
+        return -1;
+    }
 
-    if (rc == 0) {
+    if (!WIFEXITED(status)) {
+        SLOGE("Filesystem (ext4) format did not exit properly");
+        errno = EIO;
+        return -1;
+    }
+
+    status = WEXITSTATUS(status);
+
+    if (status == 0) {
         SLOGI("Filesystem (ext4) formatted OK");
         return 0;
     } else {
-        SLOGE("Format (ext4) failed (unknown exit code %d)", rc);
+        SLOGE("Format (ext4) failed (unknown exit code %d)", status);
         errno = EIO;
         return -1;
     }
