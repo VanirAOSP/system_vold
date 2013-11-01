@@ -173,33 +173,6 @@ static int process_config(VolumeManager *vm)
             DirectVolume *dv = NULL;
             flags = 0;
 
-            dv = new DirectVolume(vm, fstab->recs[i].label,
-                                  fstab->recs[i].mount_point,
-                                  fstab->recs[i].partnum);
-
-            /* To allow symlinked paths to be specified we need to convert
-             * them with realpath(). This is made a bit more complicated
-             * because our paths are relative to the sysfs base, so we need
-             * to prefix them with '/sys' before conversion and also remove
-             * '/sys' from the result (by skipping the first 4 characters).
-             */
-            char* sp = (char*)malloc(4 + strlen(fstab->recs[i].blk_device) + 1);
-            int error = !sp;
-            if (!error) {
-                strcpy(sp, "/sys");
-                strcat(sp, fstab->recs[i].blk_device);
-                char *rp = realpath(sp, NULL);
-                if (rp && strncmp(rp, "/sys", 4)==0)
-                    error = dv->addPath(rp + 4); /* Real path without '/sys' */
-                free(rp);
-                free(sp);
-            }
-            if (error) {
-                SLOGE("Failed to add devpath %s to volume %s",
-                      fstab->recs[i].blk_device, fstab->recs[i].label);
-                goto out_fail;
-            }
-
             /* Set any flags that might be set for this volume */
             if (fs_mgr_is_nonremovable(&fstab->recs[i])) {
                 flags |= VOL_NONREMOVABLE;
@@ -207,7 +180,18 @@ static int process_config(VolumeManager *vm)
             if (fs_mgr_is_encryptable(&fstab->recs[i])) {
                 flags |= VOL_ENCRYPTABLE;
             }
-            dv->setFlags(flags);
+            /* Only set this flag if there is not an emulated sd card */
+            if (fs_mgr_is_noemulatedsd(&fstab->recs[i]) &&
+                !strcmp(fstab->recs[i].fs_type, "vfat")) {
+                flags |= VOL_PROVIDES_ASEC;
+            }
+            dv = new DirectVolume(vm, &(fstab->recs[i]), flags);
+
+            if (dv->addPath(fstab->recs[i].blk_device)) {
+                SLOGE("Failed to add devpath %s to volume %s",
+                      fstab->recs[i].blk_device, fstab->recs[i].label);
+                goto out_fail;
+            }
 
             vm->addVolume(dv);
         }

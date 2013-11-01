@@ -92,7 +92,7 @@ public:
     int shareVolume(const char *label, const char *method);
     int unshareVolume(const char *label, const char *method);
     int shareEnabled(const char *path, const char *method, bool *enabled);
-    int formatVolume(const char *label, const char *fstype = NULL);
+    int formatVolume(const char *label, const char *fstype = NULL, bool wipe=false);
     void disableVolumeManager(void) { mVolManagerDisabled = 1; }
 
     /* ASEC */
@@ -148,6 +148,15 @@ public:
     int getNumDirectVolumes(void);
     int getDirectVolumeList(struct volume_info *vol_list);
     int unmountAllAsecsInDir(const char *directory);
+
+    /*
+     * Ensure that all directories along given path exist, creating parent
+     * directories as needed.  Validates that given path is absolute and that
+     * it contains no relative "." or ".." paths or symlinks.  Last path segment
+     * is treated as filename and ignored, unless the path ends with "/".  Also
+     * ensures that path belongs to a volume managed by vold.
+     */
+    int mkdirs(char* path);
 
 private:
     VolumeManager();

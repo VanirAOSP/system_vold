@@ -103,7 +103,7 @@ static void *do_fstrim_filesystems(void *ignored)
             SLOGE("FITRIM ioctl failed on %s", fstab->recs[i].mount_point);
             ret = -1;
         } else {
-                SLOGI("Trimmed %llu bytes on %s\n", range.len, fstab->recs[i].mount_point);
+            SLOGI("Trimmed %llu bytes on %s\n", range.len, fstab->recs[i].mount_point);
         }
         close(fd);
     }

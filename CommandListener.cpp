@@ -168,16 +168,16 @@ int CommandListener::VolumeCmd::runCommand(SocketClient *cli,
         }
         rc = vm->unmountVolume(argv[2], force, revert);
     } else if (!strcmp(argv[1], "format")) {
-        if (argc < 3 || argc > 4) {
-            cli->sendMsg(ResponseCode::CommandSyntaxError, "Usage: volume format <path>, <fstype>", false);
+        if (argc < 3 || argc > 4 ||
+            (argc == 4 && strcmp(argv[3], "wipe"))) {
+            cli->sendMsg(ResponseCode::CommandSyntaxError, "Usage: volume format <path> [wipe]", false);
             return 0;
         }
-        if (argc == 3) {
-            rc = vm->formatVolume(argv[2]);
-        } else {
-            rc = vm->formatVolume(argv[2], argv[3]);
+        bool wipe = false;
+        if (argc >= 4 && !strcmp(argv[3], "wipe")) {
+            wipe = true;
         }
-
+        rc = vm->formatVolume(argv[2], wipe);
     } else if (!strcmp(argv[1], "share")) {
         if (argc != 4) {
             cli->sendMsg(ResponseCode::CommandSyntaxError,
@@ -208,6 +208,12 @@ int CommandListener::VolumeCmd::runCommand(SocketClient *cli,
                     (enabled ? "Share enabled" : "Share disabled"), false);
         }
         return 0;
+    } else if (!strcmp(argv[1], "mkdirs")) {
+        if (argc != 3) {
+            cli->sendMsg(ResponseCode::CommandSyntaxError, "Usage: volume mkdirs <path>", false);
+            return 0;
+        }
+        rc = vm->mkdirs(argv[2]);
     } else {
         cli->sendMsg(ResponseCode::CommandSyntaxError, "Unknown volume cmd", false);
     }
@@ -611,6 +617,25 @@ int CommandListener::CryptfsCmd::runCommand(SocketClient *cli,
         }
         SLOGD("cryptfs verifypw {}");
         rc = cryptfs_verify_passwd(argv[2]);
+    } else if (!strcmp(argv[1], "getfield")) {
+        char valbuf[PROPERTY_VALUE_MAX];
+
+        if (argc != 3) {
+            cli->sendMsg(ResponseCode::CommandSyntaxError, "Usage: cryptfs getfield <fieldname>", false);
+            return 0;
+        }
+        dumpArgs(argc, argv, -1);
+        rc = cryptfs_getfield(argv[2], valbuf, sizeof(valbuf));
+        if (rc == 0) {
+            cli->sendMsg(ResponseCode::CryptfsGetfieldResult, valbuf, false);
+        }
+    } else if (!strcmp(argv[1], "setfield")) {
+        if (argc != 4) {
+            cli->sendMsg(ResponseCode::CommandSyntaxError, "Usage: cryptfs setfield <fieldname> <value>", false);
+            return 0;
+        }
+        dumpArgs(argc, argv, -1);
+        rc = cryptfs_setfield(argv[2], argv[3]);
     } else {
         dumpArgs(argc, argv, -1);
         cli->sendMsg(ResponseCode::CommandSyntaxError, "Unknown cryptfs cmd", false);

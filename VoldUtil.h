@@ -20,7 +20,12 @@
 #ifndef HELPER_PATH
 #define HELPER_PATH "/system/bin/"
 #endif
+#include <sys/cdefs.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+
+__BEGIN_DECLS
+  unsigned int get_blkdev_size(int fd);
+__END_DECLS
 
 #endif
