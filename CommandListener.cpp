@@ -34,14 +34,11 @@
 #include "VolumeManager.h"
 #include "ResponseCode.h"
 #include "Process.h"
+#include "Xwarp.h"
 #include "Loop.h"
 #include "Devmapper.h"
 #include "cryptfs.h"
-
-#ifndef MINIVOLD
 #include "fstrim.h"
-#include "Xwarp.h"
-#endif
 
 #define DUMP_ARGS 0
 
@@ -49,15 +46,12 @@ CommandListener::CommandListener() :
                  FrameworkListener("vold", true) {
     registerCmd(new DumpCmd());
     registerCmd(new VolumeCmd());
-    registerCmd(new StorageCmd());
-    registerCmd(new CryptfsCmd());
-
-#ifndef MINIVOLD
     registerCmd(new AsecCmd());
     registerCmd(new ObbCmd());
+    registerCmd(new StorageCmd());
     registerCmd(new XwarpCmd());
+    registerCmd(new CryptfsCmd());
     registerCmd(new FstrimCmd());
-#endif
 }
 
 void CommandListener::dumpArgs(int argc, char **argv, int argObscure) {
@@ -280,7 +274,6 @@ int CommandListener::StorageCmd::runCommand(SocketClient *cli,
     return 0;
 }
 
-#ifndef MINIVOLD
 CommandListener::AsecCmd::AsecCmd() :
                  VoldCommand("asec") {
 }
@@ -555,7 +548,6 @@ int CommandListener::XwarpCmd::runCommand(SocketClient *cli,
 
     return 0;
 }
-#endif
 
 CommandListener::CryptfsCmd::CryptfsCmd() :
                  VoldCommand("cryptfs") {
@@ -650,7 +642,6 @@ int CommandListener::CryptfsCmd::runCommand(SocketClient *cli,
     return 0;
 }
 
-#ifndef MINIVOLD
 CommandListener::FstrimCmd::FstrimCmd() :
                  VoldCommand("fstrim") {
 }
@@ -688,4 +679,3 @@ int CommandListener::FstrimCmd::runCommand(SocketClient *cli,
 
     return 0;
 }
-#endif

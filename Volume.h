@@ -17,7 +17,6 @@
 #ifndef _VOLUME_H
 #define _VOLUME_H
 
-#ifdef __cplusplus
 #include <utils/List.h>
 #include <fs_mgr.h>
 
@@ -30,7 +29,6 @@ private:
     int mFlags;
 
 public:
-#endif
     static const int State_Init       = -1;
     static const int State_NoMedia    = 0;
     static const int State_Idle       = 1;
@@ -49,9 +47,7 @@ public:
     static const char *ASECDIR;
 
     static const char *LOOPDIR;
-    static const char *FUSEDIR;
 
-#ifdef __cplusplus
 protected:
     char *mLabel;
     VolumeManager *mVm;
@@ -59,7 +55,6 @@ protected:
     int mPartIdx;
     int mOrigPartIdx;
     bool mRetryMount;
-    int mLunNumber;
 
     /*
      * The major/minor tuple of the currently mounted filesystem.
@@ -72,14 +67,10 @@ public:
 
     int mountVol();
     int unmountVol(bool force, bool revert);
-    int formatVol(const char *fstype = NULL, bool wipe = false);
+    int formatVol(bool wipe);
 
     const char *getLabel() { return mLabel; }
     int getState() { return mState; }
-    bool isPrimaryStorage();
-
-    int getLunNumber() { return mLunNumber; }
-    void setLunNumber(int lunNumber);
     int getFlags() { return mFlags; };
 
     /* Mountpoint of the raw volume */
@@ -95,11 +86,10 @@ public:
     void setDebug(bool enable);
     virtual int getVolInfo(struct volume_info *v) = 0;
 
-    virtual int getDeviceNodes(dev_t *devs, int max) = 0;
-
 protected:
     void setState(int state);
 
+    virtual int getDeviceNodes(dev_t *devs, int max) = 0;
     virtual int updateDeviceInfo(char *new_path, int new_major, int new_minor) = 0;
     virtual void revertDeviceInfo(void) = 0;
     virtual int isDecrypted(void) = 0;
@@ -111,16 +101,9 @@ private:
     bool isMountpointMounted(const char *path);
     int mountAsecExternal();
     int doUnmount(const char *path, bool force);
-    int doFuseMount(const char *src, const char *dst);
     void protectFromAutorunStupidity();
 };
 
 typedef android::List<Volume *> VolumeCollection;
 
-extern "C" {
-#endif
-    const char *stateToStr(int state);
-#ifdef __cplusplus
-};
-#endif
 #endif
