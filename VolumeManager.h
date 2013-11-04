@@ -28,10 +28,6 @@
 /* The length of an MD5 hash when encoded into ASCII hex characters */
 #define MD5_ASCII_LENGTH_PLUS_NULL ((MD5_DIGEST_LENGTH*2)+1)
 
-#ifndef CUSTOM_SECOND_LUN_NUM
-#define CUSTOM_SECOND_LUN_NUM 1
-#endif
-
 typedef enum { ASEC, OBB } container_type_t;
 
 class ContainerData {
@@ -55,10 +51,6 @@ public:
 typedef android::List<ContainerData*> AsecIdCollection;
 
 class VolumeManager {
-
-public:
-    static const int SECOND_LUN_NUM = CUSTOM_SECOND_LUN_NUM;
-
 private:
     static VolumeManager *sInstance;
 
@@ -74,7 +66,6 @@ private:
     int                    mSavedDirtyRatio;
     int                    mUmsDirtyRatio;
     int                    mVolManagerDisabled;
-    int                    mNextLunNumber;
 
 public:
     virtual ~VolumeManager();
@@ -92,7 +83,7 @@ public:
     int shareVolume(const char *label, const char *method);
     int unshareVolume(const char *label, const char *method);
     int shareEnabled(const char *path, const char *method, bool *enabled);
-    int formatVolume(const char *label, const char *fstype = NULL, bool wipe=false);
+    int formatVolume(const char *label, bool wipe);
     void disableVolumeManager(void) { mVolManagerDisabled = 1; }
 
     /* ASEC */
@@ -162,7 +153,6 @@ private:
     VolumeManager();
     void readInitialState();
     bool isMountpointMounted(const char *mp);
-    int openLun(int number);
     bool isAsecInDirectory(const char *dir, const char *asec) const;
 };
 

@@ -96,6 +96,7 @@ LOCAL_MODULE:= vold
 
 LOCAL_SRC_FILES := \
 	main.cpp \
+	vold.c \
 	$(common_src_files)
 
 LOCAL_C_INCLUDES := $(common_c_includes)
