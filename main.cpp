@@ -174,9 +174,7 @@ static int process_config(VolumeManager *vm)
             DirectVolume *dv = NULL;
             flags = 0;
 
-            dv = new DirectVolume(vm, fstab->recs[i].label,
-                                  fstab->recs[i].mount_point,
-                                  fstab->recs[i].partnum);
+            dv = new DirectVolume(vm, &fstab->recs[i], 0);
 
             /* To allow symlinked paths to be specified we need to convert
              * them with realpath(). This is made a bit more complicated
