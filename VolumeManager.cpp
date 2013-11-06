@@ -34,6 +34,7 @@
 
 #include <cutils/fs.h>
 #include <cutils/log.h>
+#include <cutils/properties.h>
 
 #include <sysutils/NetlinkEvent.h>
 
@@ -67,9 +68,12 @@ VolumeManager::VolumeManager() {
     mBroadcaster = NULL;
     mUmsSharingCount = 0;
     mSavedDirtyRatio = -1;
-    // set dirty ratio to 0 when UMS is active
-    mUmsDirtyRatio = 0;
     mVolManagerDisabled = 0;
+
+    // set dirty ratio to ro.vold.umsdirtyratio (default 0) when UMS is active
+    char dirtyratio[PROPERTY_VALUE_MAX];
+    property_get("ro.vold.umsdirtyratio", dirtyratio, "0");
+    mUmsDirtyRatio = atoi(dirtyratio);
 }
 
 VolumeManager::~VolumeManager() {
@@ -930,7 +934,7 @@ int VolumeManager::mountAsec(const char *id, const char *key, int ownerUid) {
 
     int written = snprintf(mountPoint, sizeof(mountPoint), "%s/%s", Volume::ASECDIR, id);
     if ((written < 0) || (size_t(written) >= sizeof(mountPoint))) {
-        SLOGE("ASEC mount failed: couldn't construct mountpoint", id);
+        SLOGE("ASEC mount failed: couldn't construct mountpoint %s", id);
         return -1;
     }
 
@@ -1077,7 +1081,7 @@ int VolumeManager::mountObb(const char *img, const char *key, int ownerGid) {
 
     int written = snprintf(mountPoint, sizeof(mountPoint), "%s/%s", Volume::LOOPDIR, idHash);
     if ((written < 0) || (size_t(written) >= sizeof(mountPoint))) {
-        SLOGE("OBB mount failed: couldn't construct mountpoint", img);
+        SLOGE("OBB mount failed: couldn't construct mountpoint %s", img);
         return -1;
     }
 
@@ -1288,6 +1292,17 @@ int VolumeManager::shareVolume(const char *label, const char *method) {
         errno = EINVAL;
         return -1;
     }
+
+#ifdef VOLD_EMMC_SHARES_DEV_MAJOR
+    // If emmc and sdcard share dev major number, vold may pick
+    // incorrectly based on partition nodes alone. Use device nodes instead.
+    v->getDeviceNodes((dev_t *) &d, 1);
+    if ((MAJOR(d) == 0) && (MINOR(d) == 0)) {
+        // This volume does not support raw disk access
+        errno = EINVAL;
+        return -1;
+    }
+#endif
 
     int fd;
     char nodepath[255];
