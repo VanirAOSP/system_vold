@@ -17,9 +17,6 @@
 #ifndef _VOLDUTIL_H
 #define _VOLDUTIL_H
 
-#ifndef HELPER_PATH
-#define HELPER_PATH "/system/bin/"
-#endif
 #include <sys/cdefs.h>
 
 #ifndef HELPER_PATH
