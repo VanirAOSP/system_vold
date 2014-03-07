@@ -307,7 +307,7 @@ int Volume::formatVol(bool wipe, const char* fstype) {
     if (fstype == NULL) {
         fstype2 = getFsType((const char*)devicePath);
         if (fstype2 == NULL) {
-            fstype2 = "";
+            fstype2 = (char *)"";
         }
     } else {
         fstype2 = strdup(fstype);
