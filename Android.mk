@@ -24,6 +24,10 @@ ifneq ($(KERNEL_NTFS_MODULE_NAME),)
   common_cflags += -DNTFS_MODULE_NAME=\"$(KERNEL_NTFS_MODULE_NAME)\"
 endif
 
+ifeq ($(BOARD_VOLD_CRYPTFS_MIGRATE), true)
+common_cflags += -DCRYPTFS_MIGRATE
+endif
+
 common_cflags += -Werror
 
 common_src_files := \
