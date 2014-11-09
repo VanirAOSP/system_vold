@@ -80,6 +80,7 @@ DirectVolume::DirectVolume(VolumeManager *vm, const fstab_rec* rec, int flags) :
     mDiskMinor = -1;
     mDiskNumParts = 0;
     mIsDecrypted = 0;
+    mIsValid = true;
 
     if (strcmp(rec->mount_point, "auto") != 0) {
         ALOGE("Vold managed volumes must have auto mount point; ignoring %s",
@@ -135,12 +136,38 @@ void DirectVolume::handleVolumeUnshared() {
     setState(Volume::State_Idle);
 }
 
+int DirectVolume::getUICCVolumeNum(const char *dp) {
+    int mVolNum = -1;
+    if (strstr(dp, ":0:0:0"))
+        mVolNum = 0;
+    else if (strstr(dp, ":0:0:1"))
+        mVolNum = 1;
+
+    return mVolNum;
+}
+
 int DirectVolume::handleBlockEvent(NetlinkEvent *evt) {
     const char *dp = evt->findParam("DEVPATH");
 
     PathCollection::iterator  it;
     for (it = mPaths->begin(); it != mPaths->end(); ++it) {
         if ((*it)->match(dp)) {
+
+            /* Check for UICC prefix in label */
+            if (strstr(getLabel(), "uicc")) {
+                char mLabel[15];
+                int mNum = getUICCVolumeNum(dp);
+                if (mNum < 0) {
+                    SLOGE("Invalid uicc volume number");
+                    continue;
+                }
+
+                snprintf(mLabel, sizeof(mLabel), "uicc%d", mNum);
+                if (strncmp(getLabel(), mLabel, strlen(mLabel)) != 0)
+                    continue;
+            }
+            setValidSysfs(true);
+
             /* We can handle this disk */
             int action = evt->getAction();
             const char *devtype = evt->findParam("DEVTYPE");
@@ -336,6 +363,23 @@ void DirectVolume::handleDiskRemoved(const char * /*devpath*/,
              getLabel(), getFuseMountpoint(), major, minor);
     mVm->getBroadcaster()->sendBroadcast(ResponseCode::VolumeDiskRemoved,
                                              msg, false);
+
+    if ((dev_t) MKDEV(major, minor) == mCurrentlyMountedKdev) {
+
+        bool providesAsec = (getFlags() & VOL_PROVIDES_ASEC) != 0;
+        if (providesAsec && mVm->cleanupAsec(this, true)) {
+            SLOGE("Failed to cleanup ASEC - unmount will probably fail!");
+        }
+
+        if (Volume::unmountVol(true, false)) {
+            SLOGE("Failed to unmount volume on bad removal (%s)",
+                 strerror(errno));
+            // XXX: At this point we're screwed for now
+        } else {
+            SLOGD("Crisis averted");
+        }
+    }
+
     setState(Volume::State_NoMedia);
 }
 
