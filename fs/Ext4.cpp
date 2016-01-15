@@ -134,7 +134,8 @@ status_t Check(const std::string& source, const std::string& target, bool truste
 }
 
 status_t Mount(const std::string& source, const std::string& target, bool ro,
-        bool remount, bool executable, const std::string& opts /* = "" */) {
+        bool remount, bool executable, const std::string& opts /* = "" */,
+        bool trusted) {
     int rc;
     unsigned long flags;
 
@@ -145,7 +146,7 @@ status_t Mount(const std::string& source, const std::string& target, bool ro,
     flags = MS_NOATIME | MS_NODEV | MS_NOSUID;
 
     // Only use MS_DIRSYNC if we're not mounting adopted storage
-    if (strncmp(c_target, privatePathPrefix, strlen(privatePathPrefix))) {
+    if (!trusted) {
         flags |= MS_DIRSYNC;
     }
 
