@@ -58,7 +58,7 @@ status_t Mount(const std::string& source, const std::string& target,
     unsigned long flags = MS_NOATIME | MS_NODEV | MS_NOSUID;
 
     // Only use MS_DIRSYNC if we're not mounting adopted storage
-    if (!trusted) {
+    if (!trusted || strncmp(c_target, privatePathPrefix, strlen(privatePathPrefix))) {
         flags |= MS_DIRSYNC;
     }
 
