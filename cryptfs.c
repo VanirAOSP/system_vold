@@ -2458,16 +2458,6 @@ int cryptfs_verify_passwd(char *passwd)
         return -2;
     }
 
-    if (!master_key_saved) {
-        SLOGE("encrypted fs not yet mounted, aborting");
-        return -1;
-    }
-
-    if (!saved_mount_point) {
-        SLOGE("encrypted fs failed to save mount point, aborting");
-        return -1;
-    }
-
     if (get_crypt_ftr_and_key(&crypt_ftr)) {
         SLOGE("Error getting crypt footer and key\n");
         return -1;
@@ -2484,6 +2474,17 @@ int cryptfs_verify_passwd(char *passwd)
             else
               rc = -1;
         } else {
+#endif
+            if (!master_key_saved) {
+                SLOGE("encrypted fs not yet mounted, aborting");
+                return -1;
+            }
+
+            if (!saved_mount_point) {
+                SLOGE("encrypted fs failed to save mount point, aborting");
+                return -1;
+            }
+
             decrypt_master_key(passwd, decrypted_master_key, &crypt_ftr, 0, 0);
             if (!memcmp(decrypted_master_key, saved_master_key, crypt_ftr.keysize)) {
                 /* They match, the password is correct */
@@ -2493,16 +2494,7 @@ int cryptfs_verify_passwd(char *passwd)
                 sleep(1);
                 rc = 1;
             }
-        }
-#else
-        decrypt_master_key(passwd, decrypted_master_key, &crypt_ftr, 0, 0);
-        if (!memcmp(decrypted_master_key, saved_master_key, crypt_ftr.keysize)) {
-            /* They match, the password is correct */
-            rc = 0;
-        } else {
-            /* If incorrect, sleep for a bit to prevent dictionary attacks */
-            sleep(1);
-            rc = 1;
+#ifdef CONFIG_HW_DISK_ENCRYPTION
         }
 #endif
     }
